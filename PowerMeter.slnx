@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="PowerMeter.vcxproj" Id="7dd03001-0e2e-4a5c-a48f-4711e8f77211" />
+</Solution>
