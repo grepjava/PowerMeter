@@ -144,6 +144,13 @@
     <Image Include="small.ico" />
   </ItemGroup>
   <ItemGroup>
+    <None Include=".gitignore" />
+    <None Include="ACSIL\PowerMeterFeed.vcxproj" />
+    <None Include="ACSIL\PowerMeterFeedJS.vcxproj" />
+    <None Include="build_acsil.ps1" />
+    <None Include="docs\ALGORITHM_NOTES.md" />
+    <None Include="docs\README.md" />
+    <None Include="package.ps1" />
     <None Include="PowerMeter\gen_icon.ps1" />
     <None Include="PowerMeter\PowerMeter\gen_icon.ps1" />
     <None Include="PowerMeter\PowerMeter\gen_icon_new.ps1" />

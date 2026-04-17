@@ -1,6 +1,6 @@
 # PowerMeter — User Guide
 
-> **Version 1.0** | Windows 10 / 11 (64-bit) | Sierra Chart compatible
+> **Version 1.1** | Windows 10 / 11 (64-bit) | Sierra Chart compatible
 
 ---
 
@@ -23,26 +23,48 @@
 
 ## 1. What Is PowerMeter?
 
-PowerMeter is a two-component real-time DOM analysis tool for Sierra Chart:
+PowerMeter is a two-component real-time market analysis tool for Sierra Chart:
 
 | Component | What it does |
 |---|---|
 | **PowerMeter.exe** | Always-on-top Win32 overlay that displays three live bar-meters |
-| **ACSIL Study** (DLL) | Sierra Chart study that reads live DOM data and pushes it to the overlay via Windows shared memory |
+| **ACSIL Study** (DLL) | Sierra Chart study that reads live execution and DOM data and pushes it to the overlay via Windows shared memory |
 
-The overlay shows three columns of data, each with a **red** (bearish) bar and a **blue** (bullish) bar. The relative size of the bars indicates directional pressure in the market at that moment.
+The overlay shows three columns of data, each with a **red** (bearish / sell-side) bar and a **blue** (bullish / buy-side) bar. The relative size of the bars indicates directional pressure in the market at that moment.
+
+### Vertical layout (default)
 
 ```
-┌──────────────────────────────┐
-│  [R]  [⊕]  [X]              │  ← Reset / Pin-to-top / Close
-│                              │
-│  RBV   ASK   Bear P/S        │  ← top labels
-│  ████  ████  ████            │  red  (bearish / sell side)
-│  ────  ────  ────            │  ← 50 % midline (yellow)
-│  ████  ████  ████            │  blue (bullish / buy side)
-│  RAV   BID   Bull P/S        │  ← bottom labels
-└──────────────────────────────┘
++------------------------------+
+|  [R] [<>]           [pin][X] |  <- Reset / Orient / Pin / Close
+|                              |
+|  TBV   ASK   Bear P/S        |  <- top labels
+|  ####  ####  ####            |  red  (sell-aggressor / bearish)
+|  --------------------------  |  <- 50% midline (yellow, spans all columns)
+|  ####  ####  ####            |  blue (buy-aggressor / bullish)
+|  TAV   BID   Bull P/S        |  <- bottom labels
++------------------------------+
 ```
+
+### Horizontal layout (press the green orient button to toggle)
+
+```
++--------------------------------------------------------+
+|  [R] [<>]                                   [pin] [X] |
+|                         TBV                            |
+|  #################### | ############################  |
+|                         TAV                            |
+|                         ASK                            |
+|  ################################ | ###############    |
+|                         BID                            |
+|                      Bear P/S                          |
+|  ##################################################    |
+|                      Bull P/S                          |
++--------------------------------------------------------+
+```
+
+The vertical yellow line at the horizontal 50% centre spans all three rows in horizontal mode.
+Each bar is the same thickness in both orientations.
 
 > **No SierraChart connection?** The overlay shows animated demo data automatically and switches to live data as soon as the study is loaded.
 
@@ -63,20 +85,21 @@ The overlay shows three columns of data, each with a **red** (bearish) bar and a
 ## 3. What's in the Package
 
 ```
-PowerMeter_v1.0\
-├── PowerMeter.exe              ← The overlay application (just run it)
-├── README.md                   ← This file
-│
-├── ACSIL\
-│   ├── PowerMeterFeed_64.dll   ← Pre-built ACSIL study (custom algorithm)
-│   ├── PowerMeterFeedJS_64.dll ← Pre-built ACSIL study (Jigsaw-style)
-│   ├── build_acsil.ps1         ← Script to rebuild DLLs if needed
-│   └── src\
-│       ├── PowerMeterFeed.cpp
-│       └── PowerMeterFeedJS.cpp
-│
-└── docs\
-    └── ALGORITHM_NOTES.md      ← Technical description of both algorithms
+PowerMeter_v1.1/
++-- PowerMeter.exe              <- The overlay application (just run it)
++-- README.md                   <- This file
+|
++-- ACSIL/
+|   +-- PowerMeterFeed_64.dll   <- Pre-built ACSIL study (custom algorithm)
+|   +-- PowerMeterFeedJS_64.dll <- Pre-built ACSIL study (Jigsaw-style)
+|   +-- build_acsil.ps1         <- Script to rebuild DLLs if needed
+|   +-- src/
+|       +-- PowerMeterFeed.cpp
+|       +-- PowerMeterFeedJS.cpp
+|
++-- docs/
+    +-- README.md               <- This file
+    +-- ALGORITHM_NOTES.md      <- Technical description of both algorithms
 ```
 
 ---
@@ -108,12 +131,13 @@ To have it launch automatically:
 
 | Control | Action |
 |---|---|
-| **R** button (top-left) | Resets all bars to zero |
-| **Pin** button (middle-top, turns gold) | Toggles always-on-top mode |
-| **X** button (top-right) | Closes the overlay |
+| **R** button (top-left, red) | Resets Col 0 accumulator to zero with full rebase — persistent across live updates |
+| **Orient** button (top-left, green) | Toggles between vertical (220 x 760) and horizontal stacked (700 x 350) layout |
+| **Pin** button (top-right, turns gold) | Toggles always-on-top mode |
+| **X** button (top-right, red) | Closes the overlay |
 | **Drag the top strip** | Moves the window anywhere on screen |
 
-Window position and pin state are saved to the registry (`HKCU\Software\PowerMeter`) and restored on next launch.
+Window position, pin state, and orientation are saved to the registry (`HKCU\Software\PowerMeter`) and restored on next launch.
 
 ---
 
@@ -145,8 +169,7 @@ The study requires Level 2 / DOM data:
 1. Open the chart you want to analyse (e.g., `ESH25 - CME Globex`).
 2. **Right-click the chart → Chart Settings → Market Depth tab**.
 3. Set **Number of Bid Levels** and **Number of Ask Levels** to at least **12** (20 recommended).
-4. Set **"Clear Recent Bid Ask Volume Inactive Time (ms)"** to **2500** (matches Jigsaw Depth & Sales default).
-5. Click OK.
+4. Click OK.
 
 ### Step 3 — Add the Study
 
@@ -161,7 +184,7 @@ The study requires Level 2 / DOM data:
 Enable the **Debug Log** input (set to **Yes**) temporarily. In the Sierra Chart **Message Log** (Analysis → Message Log) you should see lines like:
 
 ```
-PM | RecentAsk=1420 RecentBid=980 | BearPS=142.3 BullPS=188.5 | AskDOM=2340 BidDOM=3100 | IPC=OK
+PM | ExecAsk=1420 ExecBid=980 | BearPS=142.3 BullPS=188.5 | AskDOM=2340 BidDOM=3100 | IPC=OK
 ```
 
 `IPC=OK` confirms the overlay has connected. Turn **Debug Log** back to **No** for live trading.
@@ -177,7 +200,6 @@ Open the study settings (click the study in the Studies list → Settings):
 | Input | Recommended value | Why |
 |---|---|---|
 | DOM Levels Per Side Cap | 10 | Limits how deep the DOM scan goes |
-| Recent Vol Levels Per Side | 5 | ~1.25 points on ES at the inside market |
 | Include Best Bid/Ask Level | Yes | Level 0 (best bid/ask) is usually the most informative |
 | Depth Levels (P/S) | 6 | How many DOM levels to scan for pulls and stacks |
 | Snapshot Levels (DOM) | 12 | DOM levels included in the total volume bars |
@@ -185,7 +207,7 @@ Open the study settings (click the study in the Studies list → Settings):
 | Pull Burst Window (ms) | 900 | Window to detect rapid successive pulls |
 | Debug Log | No | Keep off during live trading |
 
-> For the JS variant only `DOM Levels Per Side Cap`, `Recent Vol Levels Per Side`, `Include Best Bid/Ask Level`, `Depth Levels (P/S)`, `Snapshot Levels (DOM)`, and `Debug Log` are available.
+> For the JS variant only `DOM Levels Per Side Cap`, `Include Best Bid/Ask Level`, `Depth Levels (P/S)`, `Snapshot Levels (DOM)`, and `Debug Log` are available.
 
 ---
 
@@ -195,15 +217,14 @@ Open the study settings (click the study in the Studies list → Settings):
 
 ```
 Col 0  Col 2  Col 1
- RBV    ASK    Bear
- ---    ---    ---    ← 50% mid-line (yellow)
- ---    ---    ---
- RAV    BID    Bull
+ TBV    ASK    Bear P/S
+ ---    ---    ---     <- 50% mid-line (yellow)
+ TAV    BID    Bull P/S
 ```
 
-| Column | Red (top) | Blue (bottom) | What it shows |
+| Column | Red | Blue | What it shows |
 |---|---|---|---|
-| **Col 0** | RBV — Recent Bid Volume | RAV — Recent Ask Volume | Tape activity at the inside market over the last N price levels. Large RBV = sellers hitting bid aggressively. Large RAV = buyers lifting ask. |
+| **Col 0** | TBV — Traded Bid Volume | TAV — Traded Ask Volume | Executed trade volume split by aggressor side, accumulated since last reset. **Red = sell-aggressor trades** (hitting the bid). **Blue = buy-aggressor trades** (lifting the ask). Source: `sc.BidVolume` / `sc.AskVolume` (bar-level execution arrays, same as footprint chart). |
 | **Col 1** | Bear P/S | Bull P/S | Composite Pull/Stack score. Red dominating = bearish DOM pressure (bid pulls + ask stacks). Blue dominating = bullish DOM pressure (ask pulls + bid stacks). |
 | **Col 2** | ASK DOM total | BID DOM total | Raw resting volume on the ask vs bid side across the configured snapshot levels. A much larger BID total suggests a defensive buy wall; larger ASK total suggests supply overhead. |
 
@@ -214,8 +235,18 @@ Col 0  Col 2  Col 1
 - **Col 0 and Col 1 agree, Col 2 opposite**: order flow fighting a passive wall — watch for absorption or sweep.
 - **Bars close to 50/50**: balanced market, low conviction either way.
 
+### The Reset button and Col 0 persistence
+
+The **R** button performs a persistent reset for Col 0:
+
+- The local accumulator (Traded Bid / Traded Ask counts) is zeroed.
+- The previous-raw-value anchor is rebased to the current live reading so the very next tick produces a delta of zero.
+- Cols 1 and 2 are also zeroed visually on reset.
+
+This means the reset **holds** — it does not snap back to the session total on the next timer tick.
+
 ### Demo mode
-When no live data is available (PowerMeter.exe started before the SC study, or after Sierra Chart closes), the bars animate randomly. This is intentional — it confirms the overlay is running.
+When no live data is available (PowerMeter.exe started before the SC study, or after Sierra Chart closes), the bars animate randomly. This confirms the overlay is running.
 
 ---
 
@@ -223,15 +254,15 @@ When no live data is available (PowerMeter.exe started before the SC study, or a
 
 | Feature | PowerMeterFeed (Custom) | PowerMeterFeedJS (Jigsaw-style) |
 |---|---|---|
-| Column 0 (Recent Vol) | ✓ Same | ✓ Same |
-| Column 1 P/S — exponential depth decay | ✓ Configurable | ✗ Flat (all levels equal weight) |
-| Column 1 P/S — pull weight / stack weight | ✓ Separate sliders | ✗ Fixed at 1.0 |
-| Column 1 P/S — stack persistence ramp | ✓ Yes | ✗ No |
-| Column 1 P/S — pull burst detection | ✓ Yes | ✗ No |
-| Column 1 P/S — continuation confirmation | ✓ Yes | ✗ No |
-| Column 1 P/S — minimum thresholds | ✓ Yes | ✗ No |
-| Column 2 (DOM totals) | ✓ Same | ✓ Same |
-| Number of configurable inputs | 19 | 6 |
+| Column 0 (Executed Vol) | Same | Same |
+| Column 1 P/S — exponential depth decay | Configurable | Flat (all levels equal weight) |
+| Column 1 P/S — pull weight / stack weight | Separate sliders | Fixed at 1.0 |
+| Column 1 P/S — stack persistence ramp | Yes | No |
+| Column 1 P/S — pull burst detection | Yes | No |
+| Column 1 P/S — continuation confirmation | Yes | No |
+| Column 1 P/S — minimum thresholds | Yes | No |
+| Column 2 (DOM totals) | Same | Same |
+| Number of configurable inputs | 18 | 5 |
 
 **Use `PowerMeterFeedJS`** if you:
 - Are new to DOM analysis and want a clean, unfiltered signal.
@@ -253,41 +284,39 @@ When no live data is available (PowerMeter.exe started before the SC study, or a
 | # | Input name | Type | Default | Description |
 |---|---|---|---|---|
 | 0 | DOM Levels Per Side Cap | Int | 10 | Global cap applied to all level counts. 0 = no cap. |
-| 1 | Recent Vol Levels Per Side | Int | 5 | Number of price levels summed for Col 0. Counted from `LastTradePrice` up (ask) and down (bid). |
-| 2 | Include Best Bid/Ask Level | Yes/No | Yes | Whether level 0 (best bid/ask) is included in DOM scans. |
-| 3 | Pull Sum Decay Constant k | Float | 0.10 | Exponential weight `exp(-k × level_offset)`. 0 = flat (equal weight per level). Higher k = inner levels dominate. |
-| 4 | Debug Log | Yes/No | No | Writes a line to SC Message Log on every tick. Enable briefly to verify IPC=OK. |
-| 5 | Pull Weight | Float | 1.1 | Multiplier applied to all pull contributions in Col 1. |
-| 6 | Stack Weight | Float | 1.0 | Base multiplier applied to stack contributions before persistence ramp. |
-| 7 | Depth Levels (P/S) | Int | 6 | How many DOM levels (per side) are scanned for P/S calculation. |
-| 8 | Snapshot Levels (DOM) | Int | 12 | How many DOM levels are summed for Col 2 total volumes. |
-| 9 | Stack Persistence (ms) | Int | 900 | Time (ms) a stack must hold at the same price before weight begins ramping toward Persistent Weight. |
-| 10 | Stack Weight When Persistent | Float | 1.6 | Final weight after full persistence window. Ramps linearly from Stack Weight over the persistence period. |
-| 11 | Pull Burst Window (ms) | Int | 900 | Time window to count pull events per DOM level for burst detection. |
-| 12 | Pull Burst Count Threshold | Int | 3 | Number of pulls within the window required to trigger the burst multiplier. |
-| 13 | Pull Burst Boost | Float | 1.2 | Multiplier applied to a pull contribution when the burst threshold is met. |
-| 14 | Continuation Window (ms) | Int | 1300 | Time window for direction continuation tracking. |
-| 15 | Continuation Boost | Float | 1.4 | Multiplier applied to the dominant side when the same direction has been dominant for ≥ 2 consecutive ticks within the window. |
-| 16 | Minimum Pull Threshold | Int | 15 | Pulls with absolute value below this are ignored (noise filter). |
-| 17 | Minimum Stack Threshold | Int | 20 | Stacks with value below this are ignored (noise filter). |
-| 18 | Use Continuation Filter | Yes/No | Yes | Master switch for continuation boost. |
+| 1 | Include Best Bid/Ask Level | Yes/No | Yes | Whether level 0 (best bid/ask) is included in DOM scans. |
+| 2 | Pull Sum Decay Constant k | Float | 0.10 | Exponential weight `exp(-k x level_offset)`. 0 = flat. Higher k = inner levels dominate. |
+| 3 | Debug Log | Yes/No | No | Writes a line to SC Message Log on every tick. Enable briefly to verify IPC=OK. |
+| 4 | Pull Weight | Float | 1.1 | Multiplier applied to all pull contributions in Col 1. |
+| 5 | Stack Weight | Float | 1.0 | Base multiplier applied to stack contributions before persistence ramp. |
+| 6 | Depth Levels (P/S) | Int | 6 | How many DOM levels (per side) are scanned for P/S calculation. |
+| 7 | Snapshot Levels (DOM) | Int | 12 | How many DOM levels are summed for Col 2 total volumes. |
+| 8 | Stack Persistence (ms) | Int | 900 | Time (ms) a stack must hold before weight ramps toward Persistent Weight. |
+| 9 | Stack Weight When Persistent | Float | 1.6 | Final weight after full persistence window. Ramps linearly from Stack Weight. |
+| 10 | Pull Burst Window (ms) | Int | 900 | Time window to count pull events per DOM level for burst detection. |
+| 11 | Pull Burst Count Threshold | Int | 3 | Number of pulls within the window required to trigger the burst multiplier. |
+| 12 | Pull Burst Boost | Float | 1.2 | Multiplier applied to a pull when the burst threshold is met. |
+| 13 | Continuation Window (ms) | Int | 1300 | Time window for direction continuation tracking. |
+| 14 | Continuation Boost | Float | 1.4 | Multiplier applied to the dominant side when dominant for 2+ consecutive ticks. |
+| 15 | Minimum Pull Threshold | Int | 15 | Pulls with absolute value below this are ignored (noise filter). |
+| 16 | Minimum Stack Threshold | Int | 20 | Stacks with value below this are ignored (noise filter). |
+| 17 | Use Continuation Filter | Yes/No | Yes | Master switch for continuation boost. |
 
 ### PowerMeterFeedJS inputs
 
 | # | Input name | Type | Default | Description |
 |---|---|---|---|---|
 | 0 | DOM Levels Per Side Cap | Int | 10 | Same as above. |
-| 1 | Recent Vol Levels Per Side | Int | 5 | Same as above. |
-| 2 | Include Best Bid/Ask Level | Yes/No | No | JS default is No (skips level 0 as in standard Jigsaw behaviour). |
-| 3 | Depth Levels (P/S) | Int | 4 | Fewer levels than the custom variant by default. |
-| 4 | Snapshot Levels (DOM) | Int | 6 | Fewer snapshot levels by default. |
-| 5 | Debug Log | Yes/No | No | Same as above. |
+| 1 | Include Best Bid/Ask Level | Yes/No | No | JS default is No (skips level 0 as in standard Jigsaw behaviour). |
+| 2 | Depth Levels (P/S) | Int | 4 | Fewer levels than the custom variant by default. |
+| 3 | Snapshot Levels (DOM) | Int | 6 | Fewer snapshot levels by default. |
+| 4 | Debug Log | Yes/No | No | Same as above. |
 
 ---
 
 ## 11. Rebuilding the DLLs from Source
 
-The pre-built DLLs target x64 Windows and should run on any 64-bit system. If you need to rebuild (e.g., after editing the source), you have two options:
+The pre-built DLLs target x64 Windows. If you need to rebuild:
 
 ### Option A — PowerShell script (easiest)
 
@@ -311,7 +340,7 @@ The script:
 
 ### Option C — Visual Studio project
 
-The package developer can open `ACSIL\PowerMeterFeed.vcxproj` or `ACSIL\PowerMeterFeedJS.vcxproj` in Visual Studio and build with **Release | x64**.
+Open `ACSIL\PowerMeterFeed.vcxproj` or `ACSIL\PowerMeterFeedJS.vcxproj` in Visual Studio and build with **Release | x64**.
 
 ---
 
@@ -319,15 +348,16 @@ The package developer can open `ACSIL\PowerMeterFeed.vcxproj` or `ACSIL\PowerMet
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Overlay stays in demo mode (animated bars, no numbers matching SC) | Study not loaded, or IPC not connected | Check that the DLL is in `C:\SierraChart\Data\`, the study is applied to an active chart, and the chart has DOM data. Enable Debug Log and check for `IPC=OK`. |
-| Study does not appear in Add Custom Study | DLL not in Data folder | Copy the `.dll` to `C:\SierraChart\Data\` and restart Sierra Chart, then re-open Add Custom Study. |
-| "Failed to load study" error in SC | DLL built for wrong architecture | Confirm the DLL is 64-bit (`_64.dll` suffix). Rebuild with `build_acsil.ps1` on your machine. |
-| Bars always show 0 | DOM data not enabled on the chart | Right-click chart → Chart Settings → Market Depth → set Bid/Ask levels to ≥ 12. |
-| Col 0 (RBV / RAV) stays near zero | Recent Bid/Ask Volume not accumulating | In Chart Settings → Market Depth, confirm "Clear Recent Bid Ask Volume Inactive Time" is > 0 (recommended 2500 ms). |
-| Col 1 (P/S) is very noisy | Thresholds too low | Increase `Minimum Pull Threshold` and `Minimum Stack Threshold`. Start with 15 and 20 respectively. |
-| Two studies loaded simultaneously | Both writing to same shared memory | Remove one study. Only one `PowerMeterFeed` variant should be active at a time. |
-| Overlay crashes / disappears | OS DPI or display scaling issue | Right-click `PowerMeter.exe` → Properties → Compatibility → Override DPI scaling → set to "Application". |
-| Window position lost after restart | Registry key missing / permission issue | Run `PowerMeter.exe` once as Administrator to allow registry write, then run normally after. |
+| Overlay stays in demo mode | Study not loaded or IPC not connected | Check DLL is in `C:\SierraChart\Data\`, study is applied to an active chart with DOM data. Enable Debug Log and check for `IPC=OK`. |
+| Study does not appear in Add Custom Study | DLL not in Data folder | Copy `.dll` to `C:\SierraChart\Data\` and restart Sierra Chart. |
+| "Failed to load study" error in SC | DLL built for wrong architecture | Confirm the DLL is 64-bit (`_64.dll` suffix). Rebuild with `build_acsil.ps1`. |
+| Bars always show 0 | DOM data not enabled | Right-click chart → Chart Settings → Market Depth → set Bid/Ask levels to 12+. |
+| Col 0 (TBV/TAV) stays near zero | Bar just started or no trades yet | `sc.BidVolume` / `sc.AskVolume` reset at each new bar. The accumulator picks up as trades execute. |
+| Col 0 does not reset persistently | Old version of overlay | Ensure you are running the current build. Reset now rebases the delta anchor — it will not snap back on the next tick. |
+| Col 1 (P/S) is very noisy | Thresholds too low | Increase `Minimum Pull Threshold` and `Minimum Stack Threshold` (start: 15 and 20). |
+| Two studies loaded simultaneously | Both writing to same shared memory | Remove one study. Only one PowerMeterFeed variant should be active at a time. |
+| Overlay crashes / disappears | OS DPI scaling issue | Right-click `PowerMeter.exe` → Properties → Compatibility → Override DPI scaling → "Application". |
+| Window position lost after restart | Registry permission issue | Run `PowerMeter.exe` once as Administrator to allow registry write, then run normally. |
 
 ---
 

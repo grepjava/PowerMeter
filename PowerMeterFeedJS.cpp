@@ -4,17 +4,16 @@
 // Win32 overlay via a named Windows shared-memory segment.
 //
 // Jigsaw-like simplified mode:
-//   col0Red  (RBV)      - Recent Bid Volume summed across N DOM levels
-//   col0Blue (RAV)      - Recent Ask Volume summed across N DOM levels
+//   col0Red  (TBV)      - Executed Bid Volume: sell-aggressor trades (sc.BidVolume[idx])
+//   col0Blue (TAV)      - Executed Ask Volume: buy-aggressor trades (sc.AskVolume[idx])
 //   col1Red  (Bear P/S) - plain bid-pull sum + ask-stack sum
 //   col1Blue (Bull P/S) - plain ask-pull sum + bid-stack sum
 //   col2Red  (ASK)      - total ask-side DOM volume across configured levels
 //   col2Blue (BID)      - total bid-side DOM volume across configured levels
 //
-// Column 0 uses sc.GetRecentBidVolumeAtPrice() / sc.GetRecentAskVolumeAtPrice()
-// which match the DOM Recent Bid/Ask Volume columns exactly. Reset behaviour is
-// controlled by Chart Settings > Market Depth > "Clear Recent Bid Ask Volume
-// Inactive Time in Milliseconds" (recommended: 2500).
+// Column 0 uses sc.BidVolume[idx] / sc.AskVolume[idx] – Sierra Chart's standard
+// bar-level bid/ask execution arrays. PowerMeter.cpp applies delta accumulation
+// and persistent reset on top of these raw values.
 //
 // *** Place this file in your SierraChart ACS_Source directory ***
 // Compile from SierraChart: Analysis > Build Custom Studies DLL
@@ -33,8 +32,8 @@ SCDLLName("PowerMeter Feed JS")
 struct PMSharedData
 {
     volatile LONG sequence; // odd while writing, even when stable (seqlock)
-    float  col0Red;         // RBV  - Recent Bid Vol (DOM)
-    float  col0Blue;        // RAV  - Recent Ask Vol (DOM)
+    float  col0Red;         // TBV  - Executed at Bid Volume (sell-aggressor, sc.BidVolume[idx])
+    float  col0Blue;        // TAV  - Executed at Ask Volume (buy-aggressor, sc.AskVolume[idx])
     float  col1Red;         // Bear P/S
     float  col1Blue;        // Bull P/S
     float  col2Red;         // ASK DOM total volume
@@ -54,8 +53,8 @@ struct PMIpcContext
 SCSFExport scsf_PowerMeterFeedJS(SCStudyInterfaceRef sc)
 {
     // Subgraphs (DRAWSTYLE_IGNORE - output is IPC only, not plotted on chart)
-    SCSubgraphRef SG_RecentBid = sc.Subgraph[0]; // col0Red  - RBV (Recent Bid Vol)
-    SCSubgraphRef SG_RecentAsk = sc.Subgraph[1]; // col0Blue - RAV (Recent Ask Vol)
+    SCSubgraphRef SG_ExecBid = sc.Subgraph[0]; // col0Red  - TBV (Executed Bid Vol, sell-aggressor)
+    SCSubgraphRef SG_ExecAsk = sc.Subgraph[1]; // col0Blue - TAV (Executed Ask Vol, buy-aggressor)
     SCSubgraphRef SG_BearPS    = sc.Subgraph[2]; // col1Red  - Bear P/S
     SCSubgraphRef SG_BullPS    = sc.Subgraph[3]; // col1Blue - Bull P/S
     SCSubgraphRef SG_AskDOM    = sc.Subgraph[4]; // col2Red  - ASK DOM vol
@@ -74,26 +73,25 @@ SCSFExport scsf_PowerMeterFeedJS(SCStudyInterfaceRef sc)
     {
         sc.GraphName = "PowerMeter Feed JS";
         sc.StudyDescription =
-            "Writes live DOM data to the PowerMeter Win32 overlay via the named "
-            "shared memory segment Local\\PowerMeterLiveData. "
-            "Column 0 uses sc.GetRecentBidVolumeAtPrice / sc.GetRecentAskVolumeAtPrice "
-            "matching the DOM Recent Bid/Ask Volume columns. "
+            "Writes live DOM and execution data to the PowerMeter Win32 overlay via "
+            "the named shared memory segment Local\\PowerMeterLiveData. "
+            "Column 0 uses sc.BidVolume[idx] / sc.AskVolume[idx] for executed-at-bid "
+            "(sell-aggressor) and executed-at-ask (buy-aggressor) volume per bar. "
             "Column 1 uses plain Pull/Stack sums without persistence, burst, "
             "continuation, decay, or extra weighting. "
             "Column 2 uses plain DOM snapshot totals. "
-            "Reset behaviour for Column 0 is controlled by Chart Settings > "
-            "Market Depth > 'Clear Recent Bid Ask Volume Inactive Time in Milliseconds'.";
+            "PowerMeter.cpp applies delta accumulation and persistent reset for Column 0.";
 
         sc.GraphRegion         = 0;
         sc.AutoLoop            = 0;
         sc.UpdateAlways        = 1;
         sc.UsesMarketDepthData = 1;
 
-        SG_RecentBid.Name      = "RBV - Recent Bid Vol (DOM)";
-        SG_RecentBid.DrawStyle = DRAWSTYLE_IGNORE;
+        SG_ExecBid.Name      = "TBV - Executed Bid Vol (sell-aggressor)";
+        SG_ExecBid.DrawStyle = DRAWSTYLE_IGNORE;
 
-        SG_RecentAsk.Name      = "RAV - Recent Ask Vol (DOM)";
-        SG_RecentAsk.DrawStyle = DRAWSTYLE_IGNORE;
+        SG_ExecAsk.Name      = "TAV - Executed Ask Vol (buy-aggressor)";
+        SG_ExecAsk.DrawStyle = DRAWSTYLE_IGNORE;
 
         SG_BearPS.Name         = "Bear P/S (plain bid pulls + ask stacks)";
         SG_BearPS.DrawStyle    = DRAWSTYLE_IGNORE;
@@ -110,7 +108,7 @@ SCSFExport scsf_PowerMeterFeedJS(SCStudyInterfaceRef sc)
         i_NumLevels.Name = "DOM Levels Per Side Cap (0 = No Cap)";
         i_NumLevels.SetInt(10);
 
-        i_RecentVolLevels.Name = "Recent Vol Levels Per Side (col 0)";
+        i_RecentVolLevels.Name = "(unused) Legacy Recent Vol Levels";
         i_RecentVolLevels.SetInt(5);
 
         i_UseBestLevel.Name = "Include Best Bid/Ask Level (level 0)";
@@ -163,9 +161,7 @@ SCSFExport scsf_PowerMeterFeedJS(SCStudyInterfaceRef sc)
     // -------------------------------------------------------------------------
     int numLevels = i_NumLevels.GetInt();
 
-    int recentVolLevels = i_RecentVolLevels.GetInt();
-    if (recentVolLevels < 1)
-        recentVolLevels = 1;
+    (void)i_RecentVolLevels.GetInt(); // input slot reserved for backward compatibility
 
     const bool includeBest = (i_UseBestLevel.GetYesNo() != 0);
     const bool debugLog    = (i_DebugLog.GetYesNo() != 0);
@@ -180,8 +176,6 @@ SCSFExport scsf_PowerMeterFeedJS(SCStudyInterfaceRef sc)
 
     if (numLevels > 0)
     {
-        if (recentVolLevels > numLevels)
-            recentVolLevels = numLevels;
         if (depthLevels > numLevels)
             depthLevels = numLevels;
         if (snapshotLevels > numLevels)
@@ -202,25 +196,18 @@ SCSFExport scsf_PowerMeterFeedJS(SCStudyInterfaceRef sc)
     s_MarketDepthEntry de;
 
     // -------------------------------------------------------------------------
-    // Column 0: Recent Bid/Ask Volume (DOM Recent columns)
+    // Column 0: Executed Bid/Ask Volume (Trade Execution style)
     //
-    // Ask side: LastTradePrice upward
-    // Bid side: LastTradePrice downward
+    // Source: sc.BidVolume[idx] / sc.AskVolume[idx]
+    //   sc.BidVolume[idx] = volume executed at bid (sell-aggressors hitting bid)
+    //   sc.AskVolume[idx] = volume executed at ask (buy-aggressors lifting ask)
+    //
+    // Sierra Chart's standard bar-level bid/ask execution arrays.
+    // No inactivity-clear timer. No GetRecentBidVolumeAtPrice used.
+    // PowerMeter.cpp applies delta accumulation and persistent reset on top.
     // -------------------------------------------------------------------------
-    double recentAskVol = 0.0; // RAV - buyers lifting ask
-    double recentBidVol = 0.0; // RBV - sellers hitting bid
-
-    for (int i = 0; i < recentVolLevels; ++i)
-    {
-        const float price = sc.LastTradePrice + static_cast<float>(i * sc.TickSize);
-        recentAskVol += static_cast<double>(sc.GetRecentAskVolumeAtPrice(price));
-    }
-
-    for (int i = 0; i < recentVolLevels; ++i)
-    {
-        const float price = sc.LastTradePrice - static_cast<float>(i * sc.TickSize);
-        recentBidVol += static_cast<double>(sc.GetRecentBidVolumeAtPrice(price));
-    }
+    const double execBidVol = static_cast<double>(sc.BidVolume[idx]);  // sell-aggressor
+    const double execAskVol = static_cast<double>(sc.AskVolume[idx]);  // buy-aggressor
 
     // -------------------------------------------------------------------------
     // Column 1: Plain Pull/Stack directional composite
@@ -291,8 +278,8 @@ SCSFExport scsf_PowerMeterFeedJS(SCStudyInterfaceRef sc)
     }
 
     // Write subgraphs
-    SG_RecentBid[idx] = static_cast<float>(recentBidVol);
-    SG_RecentAsk[idx] = static_cast<float>(recentAskVol);
+    SG_ExecBid[idx] = static_cast<float>(execBidVol);
+    SG_ExecAsk[idx] = static_cast<float>(execAskVol);
     SG_BearPS[idx]    = static_cast<float>(bearPSSum);
     SG_BullPS[idx]    = static_cast<float>(bullPSSum);
     SG_AskDOM[idx]    = static_cast<float>(totalAskVol);
@@ -349,8 +336,8 @@ SCSFExport scsf_PowerMeterFeedJS(SCStudyInterfaceRef sc)
 
         InterlockedIncrement(&d->sequence); // write start (odd)
 
-        d->col0Red   = static_cast<float>(recentBidVol);
-        d->col0Blue  = static_cast<float>(recentAskVol);
+        d->col0Red   = static_cast<float>(execBidVol);
+        d->col0Blue  = static_cast<float>(execAskVol);
         d->col1Red   = static_cast<float>(bearPSSum);
         d->col1Blue  = static_cast<float>(bullPSSum);
         d->col2Red   = static_cast<float>(totalAskVol);
@@ -367,10 +354,10 @@ SCSFExport scsf_PowerMeterFeedJS(SCStudyInterfaceRef sc)
     {
         SCString msg;
         msg.Format(
-            "PMJS | RecentAsk=%.0f RecentBid=%.0f | BearPS=%.1f BullPS=%.1f | "
+            "PMJS | ExecAsk=%.0f ExecBid=%.0f | BearPS=%.1f BullPS=%.1f | "
             "AskDOM=%.0f BidDOM=%.0f | IPC=%s",
-            recentAskVol,
-            recentBidVol,
+            execAskVol,
+            execBidVol,
             bearPSSum,
             bullPSSum,
             totalAskVol,

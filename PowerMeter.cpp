@@ -49,12 +49,30 @@ static IDWriteTextFormat* g_smallTextFormat = nullptr;
 static IDWriteTextFormat* g_iconFormat      = nullptr;
 
 static D2D1_RECT_F g_resetButtonRect   = D2D1::RectF(0, 0, 0, 0);
+static D2D1_RECT_F g_orientButtonRect  = D2D1::RectF(0, 0, 0, 0);
 static D2D1_RECT_F g_pinButtonRect     = D2D1::RectF(0, 0, 0, 0);
 static D2D1_RECT_F g_closeButtonRect   = D2D1::RectF(0, 0, 0, 0);
 static bool        g_isPinned          = false;
+static bool        g_isVertical        = true;
+
+// Column 0 delta-accumulation state for persistent reset.
+// The feed sends raw sc.BidVolume[idx] / sc.AskVolume[idx] which reset each
+// new bar. We track deltas locally and accumulate them, clamping negative
+// deltas (bar resets) to zero. Reset button rebases prevRaw to the current
+// live value so the next delta is zero.
+struct Col0ResetState
+{
+    float prevRawRed  = 0.0f;
+    float prevRawBlue = 0.0f;
+    float accRed      = 0.0f;
+    float accBlue     = 0.0f;
+    bool  initialized = false;
+};
+static Col0ResetState g_col0;
 
 // Shared memory layout – must match PowerMeterFeed.cpp exactly.
-// col0Red/Blue : rolling sell / buy volume (T&S window)
+// col0Red/Blue : raw executed-at-bid / executed-at-ask bar volume from feed;
+//               locally delta-accumulated with persistent reset in UpdateDemo().
 // col1Red/Blue : bid pull sum (Bear P/S) / ask pull sum (Bull P/S)
 // col2Red/Blue : total ASK DOM volume / total BID DOM volume
 #pragma pack(push, 4)
@@ -76,7 +94,7 @@ static const PMSharedData* g_pSharedData = nullptr;
 
 static std::array<MeterColumn, 3> g_columns =
 {
-    MeterColumn{ L"RBV",      L"RAV",      0.0f, 0.0f, 0.0f, 0.0f },
+    MeterColumn{ L"TBV",      L"TAV",      0.0f, 0.0f, 0.0f, 0.0f },
     MeterColumn{ L"Bear P/S", L"Bull P/S", 0.0f, 0.0f, 0.0f, 0.0f },
     MeterColumn{ L"ASK",      L"BID",      0.0f, 0.0f, 0.0f, 0.0f }
 };
@@ -239,12 +257,41 @@ void CleanupResources()
 
 void ResetMetersToZero()
 {
-    for (auto& c : g_columns)
+    // Column 0: persistent rebase.
+    // Zero the accumulator and anchor prevRaw to the current live raw value so
+    // the next UpdateDemo delta starts from zero instead of the full session total.
+    g_col0.accRed  = 0.0f;
+    g_col0.accBlue = 0.0f;
+    if (g_pSharedData)
     {
-        c.redDisplay = 0.0f;
-        c.blueDisplay = 0.0f;
-        c.redTarget = 0.0f;
-        c.blueTarget = 0.0f;
+        const DWORD age = GetTickCount() - g_pSharedData->tickCount;
+        if (age < 5000)
+        {
+            g_col0.prevRawRed  = g_pSharedData->col0Red;
+            g_col0.prevRawBlue = g_pSharedData->col0Blue;
+            g_col0.initialized = true;
+        }
+        else
+        {
+            g_col0.initialized = false;
+        }
+    }
+    else
+    {
+        g_col0.initialized = false;
+    }
+    g_columns[0].redTarget   = 0.0f;
+    g_columns[0].blueTarget  = 0.0f;
+    g_columns[0].redDisplay  = 0.0f;
+    g_columns[0].blueDisplay = 0.0f;
+
+    // Columns 1 and 2: zero display/target as before.
+    for (int i = 1; i < 3; ++i)
+    {
+        g_columns[i].redDisplay  = 0.0f;
+        g_columns[i].blueDisplay = 0.0f;
+        g_columns[i].redTarget   = 0.0f;
+        g_columns[i].blueTarget  = 0.0f;
     }
 
     InvalidateRect(g_hWnd, nullptr, FALSE);
@@ -343,11 +390,11 @@ void FillRoundedRect(const D2D1_RECT_F& rect, float radiusX, float radiusY, cons
     g_renderTarget->FillRoundedRectangle(D2D1::RoundedRect(rect, radiusX, radiusY), g_brush);
 }
 
-void FillGradientRect(const D2D1_RECT_F& rect, const D2D1_COLOR_F& colorTop, const D2D1_COLOR_F& colorBottom)
+void FillGradientRect(const D2D1_RECT_F& rect, const D2D1_COLOR_F& colorStart, const D2D1_COLOR_F& colorEnd, bool gradientVertical = true)
 {
     D2D1_GRADIENT_STOP stops[2] = {
-        { 0.0f, colorTop    },
-        { 1.0f, colorBottom }
+        { 0.0f, colorStart },
+        { 1.0f, colorEnd   }
     };
 
     ID2D1GradientStopCollection* pStops = nullptr;
@@ -357,7 +404,8 @@ void FillGradientRect(const D2D1_RECT_F& rect, const D2D1_COLOR_F& colorTop, con
     ID2D1LinearGradientBrush* pGradBrush = nullptr;
     const D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES props = {
         D2D1::Point2F(rect.left, rect.top),
-        D2D1::Point2F(rect.left, rect.bottom)
+        gradientVertical ? D2D1::Point2F(rect.left,  rect.bottom)
+                         : D2D1::Point2F(rect.right, rect.top)
     };
     const HRESULT hr = g_renderTarget->CreateLinearGradientBrush(props, pStops, &pGradBrush);
     pStops->Release();
@@ -451,7 +499,43 @@ void DrawCloseButton()
     DrawTextCentered(L"X", g_closeButtonRect, true);
 }
 
-void DrawMeterColumn(const D2D1_RECT_F& outerRect, const MeterColumn& c)
+void DrawOrientButton()
+{
+    const D2D1_COLOR_F border(0.78f, 0.80f, 0.84f, 1.0f);
+    const D2D1_COLOR_F fill(0.10f, 0.48f, 0.18f, 1.0f);
+    const D2D1_COLOR_F inner(0.16f, 0.62f, 0.26f, 1.0f);
+    const D2D1_COLOR_F iconColor(0.94f, 1.0f, 0.94f, 1.0f);
+
+    FillRoundedRect(g_orientButtonRect, 4.0f, 4.0f, fill);
+    DrawRoundedRect(g_orientButtonRect, 4.0f, 4.0f, border, 1.1f);
+
+    D2D1_RECT_F innerRect = D2D1::RectF(
+        g_orientButtonRect.left + 1.5f,
+        g_orientButtonRect.top + 1.5f,
+        g_orientButtonRect.right - 1.5f,
+        g_orientButtonRect.bottom - 10.0f);
+
+    FillRoundedRect(innerRect, 3.0f, 3.0f, inner);
+
+    const float cx = (g_orientButtonRect.left + g_orientButtonRect.right)  * 0.5f;
+    const float cy = (g_orientButtonRect.top  + g_orientButtonRect.bottom) * 0.5f;
+    const float stroke = 2.2f;
+
+    if (g_isVertical)
+    {
+        // Upright T: horizontal crossbar at top, vertical stem downward
+        DrawLine(cx - 5.0f, cy - 4.0f, cx + 5.0f, cy - 4.0f, iconColor, stroke);
+        DrawLine(cx,        cy - 4.0f, cx,          cy + 5.0f, iconColor, stroke);
+    }
+    else
+    {
+        // Sideways T (rotated 90 deg CW): vertical bar on right, horizontal stem leftward
+        DrawLine(cx + 4.0f, cy - 5.0f, cx + 4.0f, cy + 5.0f, iconColor, stroke);
+        DrawLine(cx - 5.0f, cy,         cx + 4.0f, cy,         iconColor, stroke);
+    }
+}
+
+void DrawMeterColumn(const D2D1_RECT_F& outerRect, const MeterColumn& c, bool isVertical = true)
 {
     const D2D1_COLOR_F shellFill(0.92f, 0.92f, 0.94f, 1.0f);
     const D2D1_COLOR_F shellBorder(0.68f, 0.68f, 0.70f, 1.0f);
@@ -462,21 +546,42 @@ void DrawMeterColumn(const D2D1_RECT_F& outerRect, const MeterColumn& c)
     const D2D1_COLOR_F text(0.97f, 0.97f, 0.98f, 1.0f);
     const D2D1_COLOR_F labelText(0.96f, 0.96f, 0.98f, 1.0f);
 
-    D2D1_RECT_F topLabelRect = D2D1::RectF(
-        outerRect.left - 8.0f,
-        outerRect.top - 28.0f,
-        outerRect.right + 8.0f,
-        outerRect.top - 6.0f);
+    if (isVertical)
+    {
+        D2D1_RECT_F topLabelRect = D2D1::RectF(
+            outerRect.left - 8.0f,
+            outerRect.top - 28.0f,
+            outerRect.right + 8.0f,
+            outerRect.top - 6.0f);
 
-    D2D1_RECT_F bottomLabelRect = D2D1::RectF(
-        outerRect.left - 10.0f,
-        outerRect.bottom + 6.0f,
-        outerRect.right + 10.0f,
-        outerRect.bottom + 34.0f);
+        D2D1_RECT_F bottomLabelRect = D2D1::RectF(
+            outerRect.left - 10.0f,
+            outerRect.bottom + 6.0f,
+            outerRect.right + 10.0f,
+            outerRect.bottom + 34.0f);
 
-    g_brush->SetColor(labelText);
-    DrawTextCentered(c.topLabel, topLabelRect, true);
-    DrawTextCentered(c.bottomLabel, bottomLabelRect, true);
+        g_brush->SetColor(labelText);
+        DrawTextCentered(c.topLabel, topLabelRect, true);
+        DrawTextCentered(c.bottomLabel, bottomLabelRect, true);
+    }
+    else
+    {
+        D2D1_RECT_F topLabelRect = D2D1::RectF(
+            outerRect.left - 8.0f,
+            outerRect.top - 20.0f,
+            outerRect.right + 8.0f,
+            outerRect.top - 3.0f);
+
+        D2D1_RECT_F bottomLabelRect = D2D1::RectF(
+            outerRect.left - 8.0f,
+            outerRect.bottom + 3.0f,
+            outerRect.right + 8.0f,
+            outerRect.bottom + 20.0f);
+
+        g_brush->SetColor(labelText);
+        DrawTextCentered(c.topLabel, topLabelRect, true);
+        DrawTextCentered(c.bottomLabel, bottomLabelRect, true);
+    }
 
     FillRoundedRect(outerRect, 2.0f, 2.0f, shellFill);
     DrawRoundedRect(outerRect, 2.0f, 2.0f, shellBorder, 1.0f);
@@ -489,71 +594,103 @@ void DrawMeterColumn(const D2D1_RECT_F& outerRect, const MeterColumn& c)
 
     FillRoundedRect(innerRect, 1.5f, 1.5f, topBg);
 
-    const float meterHeight = innerRect.bottom - innerRect.top;
     const float total = c.redDisplay + c.blueDisplay;
+    const float redRatio = (total > 0.0001f) ? (c.redDisplay / total) : 0.0f;
 
-    float redRatio = 0.0f;
-
-    if (total > 0.0001f)
+    if (isVertical)
     {
-        redRatio = c.redDisplay / total;
-    }
+        // Bars fill top (red) to bottom (blue)
+        const float splitY = innerRect.top + ((innerRect.bottom - innerRect.top) * redRatio);
 
-    const float splitY = innerRect.top + (meterHeight * redRatio);
+        D2D1_RECT_F redRect  = D2D1::RectF(innerRect.left, innerRect.top,  innerRect.right, splitY);
+        D2D1_RECT_F blueRect = D2D1::RectF(innerRect.left, splitY,         innerRect.right, innerRect.bottom);
 
-    D2D1_RECT_F redRect = D2D1::RectF(
-        innerRect.left,
-        innerRect.top,
-        innerRect.right,
-        splitY);
+        if (total <= 0.0001f)
+        {
+            const D2D1_COLOR_F neutral(0.50f, 0.50f, 0.54f, 0.50f);
+            g_brush->SetColor(neutral);
+            g_renderTarget->FillRectangle(innerRect, g_brush);
+        }
+        else
+        {
+            if ((redRect.bottom - redRect.top) > 0.5f)
+                FillGradientRect(redRect,
+                    D2D1::ColorF(0.88f, 0.50f, 0.48f, 0.20f),
+                    D2D1::ColorF(0.65f, 0.10f, 0.08f, 0.95f));
 
-    D2D1_RECT_F blueRect = D2D1::RectF(
-        innerRect.left,
-        splitY,
-        innerRect.right,
-        innerRect.bottom);
+            if ((blueRect.bottom - blueRect.top) > 0.5f)
+                FillGradientRect(blueRect,
+                    D2D1::ColorF(0.12f, 0.20f, 0.85f, 0.95f),
+                    D2D1::ColorF(0.05f, 0.08f, 0.50f, 0.55f));
+        }
 
-    if (total <= 0.0001f)
-    {
-        const D2D1_COLOR_F neutral(0.50f, 0.50f, 0.54f, 0.50f);
-        g_brush->SetColor(neutral);
-        g_renderTarget->FillRectangle(innerRect, g_brush);
+        const int tickCount = 5;
+        for (int i = 1; i <= tickCount; ++i)
+        {
+            const float y = innerRect.top + ((innerRect.bottom - innerRect.top) * i / (tickCount + 1.0f));
+            DrawLine(innerRect.left + 10.0f, y, innerRect.right - 10.0f, y, tick, 1.0f);
+        }
+
+        DrawLine(innerRect.left, splitY, innerRect.right, splitY,
+            D2D1::ColorF(0.10f, 0.10f, 0.10f, 0.45f), 1.0f);
+
+        g_brush->SetColor(text);
+        if ((redRect.bottom - redRect.top) > 26.0f)
+            DrawVerticalDigits(static_cast<int>(std::lround(c.redDisplay)),  redRect,  false);
+        if ((blueRect.bottom - blueRect.top) > 26.0f)
+            DrawVerticalDigits(static_cast<int>(std::lround(c.blueDisplay)), blueRect, true);
     }
     else
     {
-        if ((redRect.bottom - redRect.top) > 0.5f)
-            FillGradientRect(redRect,
-                D2D1::ColorF(0.88f, 0.50f, 0.48f, 0.20f),   // top : faded pink
-                D2D1::ColorF(0.65f, 0.10f, 0.08f, 0.95f));  // bottom : deep crimson
+        // Bars fill left (red) to right (blue)
+        const float splitX = innerRect.left + ((innerRect.right - innerRect.left) * redRatio);
 
-        if ((blueRect.bottom - blueRect.top) > 0.5f)
-            FillGradientRect(blueRect,
-                D2D1::ColorF(0.12f, 0.20f, 0.85f, 0.95f),   // top : deep navy
-                D2D1::ColorF(0.05f, 0.08f, 0.50f, 0.55f));  // bottom : dark faded blue
+        D2D1_RECT_F redRect  = D2D1::RectF(innerRect.left, innerRect.top, splitX,          innerRect.bottom);
+        D2D1_RECT_F blueRect = D2D1::RectF(splitX,         innerRect.top, innerRect.right, innerRect.bottom);
+
+        if (total <= 0.0001f)
+        {
+            const D2D1_COLOR_F neutral(0.50f, 0.50f, 0.54f, 0.50f);
+            g_brush->SetColor(neutral);
+            g_renderTarget->FillRectangle(innerRect, g_brush);
+        }
+        else
+        {
+            if ((redRect.right - redRect.left) > 0.5f)
+                FillGradientRect(redRect,
+                    D2D1::ColorF(0.88f, 0.50f, 0.48f, 0.20f),
+                    D2D1::ColorF(0.65f, 0.10f, 0.08f, 0.95f), false);
+
+            if ((blueRect.right - blueRect.left) > 0.5f)
+                FillGradientRect(blueRect,
+                    D2D1::ColorF(0.12f, 0.20f, 0.85f, 0.95f),
+                    D2D1::ColorF(0.05f, 0.08f, 0.50f, 0.55f), false);
+        }
+
+        const int tickCount = 5;
+        for (int i = 1; i <= tickCount; ++i)
+        {
+            const float x = innerRect.left + ((innerRect.right - innerRect.left) * i / (tickCount + 1.0f));
+            DrawLine(x, innerRect.top + 8.0f, x, innerRect.bottom - 8.0f, tick, 1.0f);
+        }
+
+        DrawLine(splitX, innerRect.top, splitX, innerRect.bottom,
+            D2D1::ColorF(0.10f, 0.10f, 0.10f, 0.45f), 1.0f);
+
+        g_brush->SetColor(text);
+        if ((redRect.right - redRect.left) > 30.0f)
+        {
+            wchar_t buf[32]{};
+            swprintf_s(buf, L"%d", static_cast<int>(std::lround(c.redDisplay)));
+            DrawTextCentered(buf, redRect, false);
+        }
+        if ((blueRect.right - blueRect.left) > 30.0f)
+        {
+            wchar_t buf[32]{};
+            swprintf_s(buf, L"%d", static_cast<int>(std::lround(c.blueDisplay)));
+            DrawTextCentered(buf, blueRect, false);
+        }
     }
-
-    const int tickCount = 5;
-    for (int i = 1; i <= tickCount; ++i)
-    {
-        const float y = innerRect.top + ((innerRect.bottom - innerRect.top) * i / (tickCount + 1.0f));
-        DrawLine(innerRect.left + 10.0f, y, innerRect.right - 10.0f, y, tick, 1.0f);
-    }
-
-    DrawLine(
-        innerRect.left,
-        splitY,
-        innerRect.right,
-        splitY,
-        D2D1::ColorF(0.10f, 0.10f, 0.10f, 0.45f),
-        1.0f);
-
-    g_brush->SetColor(text);
-
-    if ((redRect.bottom - redRect.top) > 26.0f)
-        DrawVerticalDigits(static_cast<int>(std::lround(c.redDisplay)),  redRect,  false);
-
-    if ((blueRect.bottom - blueRect.top) > 26.0f)
-        DrawVerticalDigits(static_cast<int>(std::lround(c.blueDisplay)), blueRect, true);
 }
 
 void OnPaint(HWND hWnd)
@@ -577,33 +714,61 @@ void OnPaint(HWND hWnd)
     FillRoundedRect(outerPanel, 8.0f, 8.0f, D2D1::ColorF(0.02f, 0.02f, 0.05f, 1.0f));
     DrawRoundedRect(outerPanel, 8.0f, 8.0f, D2D1::ColorF(0.18f, 0.18f, 0.22f, 1.0f), 1.0f);
 
-    g_resetButtonRect   = D2D1::RectF(22.0f, 22.0f, 43.0f, 43.0f);
+    g_resetButtonRect   = D2D1::RectF(22.0f,         22.0f, 43.0f,         43.0f);
+    g_orientButtonRect  = D2D1::RectF(47.0f,         22.0f, 68.0f,         43.0f);
     g_pinButtonRect     = D2D1::RectF(width - 66.0f, 22.0f, width - 45.0f, 43.0f);
     g_closeButtonRect   = D2D1::RectF(width - 43.0f, 22.0f, width - 22.0f, 43.0f);
     DrawResetButton();
+    DrawOrientButton();
     DrawPinButton();
     DrawCloseButton();
 
-    const float top = 90.0f;
-    const float bottom = height - 48.0f;
-    const float colWidth = 48.0f;
-    const float gap = 10.0f;
-    const float startX = 26.0f;
-
     const int colOrder[3] = { 0, 2, 1 };
-    for (int i = 0; i < 3; ++i)
+
+    if (g_isVertical)
     {
-        const float left = startX + i * (colWidth + gap);
-        const D2D1_RECT_F rect = D2D1::RectF(left, top, left + colWidth, bottom);
-        DrawMeterColumn(rect, g_columns[colOrder[i]]);
+        const float top      = 90.0f;
+        const float bottom   = height - 48.0f;
+        const float colWidth = 48.0f;
+        const float gap      = 10.0f;
+        const float startX   = 26.0f;
+
+        for (int i = 0; i < 3; ++i)
+        {
+            const float left = startX + i * (colWidth + gap);
+            const D2D1_RECT_F rect = D2D1::RectF(left, top, left + colWidth, bottom);
+            DrawMeterColumn(rect, g_columns[colOrder[i]], true);
+        }
+
+        const D2D1_COLOR_F globalYellow(0.95f, 0.82f, 0.18f, 1.0f);
+        const float globalLeft  = startX - 8.0f;
+        const float globalRight = startX + (3.0f * colWidth) + (2.0f * gap) + 8.0f;
+        const float globalY     = top + ((bottom - top) * 0.50f);
+        DrawLine(globalLeft, globalY, globalRight, globalY, globalYellow, 2.5f);
     }
+    else
+    {
+        // Stacked layout: 3 full-width horizontal bars — same bar thickness as vertical colWidth
+        const float startX   = 26.0f;
+        const float barH     = 48.0f;           // matches vertical colWidth
+        const float rowPitch = barH + 48.0f;   // 20 label above + barH + 20 label below + 8 gap
+        const float firstTop = 70.0f;
 
-    const D2D1_COLOR_F globalYellow(0.95f, 0.82f, 0.18f, 1.0f);
-    const float globalLeft = startX - 8.0f;
-    const float globalRight = startX + (3.0f * colWidth) + (2.0f * gap) + 8.0f;
-    const float globalY = top + ((bottom - top) * 0.50f);
+        for (int i = 0; i < 3; ++i)
+        {
+            const float top    = firstTop + i * rowPitch;
+            const float bottom = top + barH;
+            const D2D1_RECT_F rect = D2D1::RectF(startX, top, width - startX, bottom);
+            DrawMeterColumn(rect, g_columns[colOrder[i]], false);
+        }
 
-    DrawLine(globalLeft, globalY, globalRight, globalY, globalYellow, 2.5f);
+        // Yellow midline: vertical line at horizontal 50% spanning all 3 rows
+        const D2D1_COLOR_F globalYellow(0.95f, 0.82f, 0.18f, 1.0f);
+        const float globalX   = startX + (width - 2.0f * startX) * 0.50f;
+        const float lineTop   = firstTop - 4.0f;
+        const float lineBottom = firstTop + 2.0f * rowPitch + barH + 4.0f;
+        DrawLine(globalX, lineTop, globalX, lineBottom, globalYellow, 2.5f);
+    }
 
     hr = g_renderTarget->EndDraw();
     if (hr == D2DERR_RECREATE_TARGET)
@@ -646,8 +811,28 @@ void UpdateDemo()
 
                 if (seq1 == seq2)
                 {
-                    g_columns[0].redTarget  = c0r;
-                    g_columns[0].blueTarget = c0b;
+                    // Column 0: delta-accumulate executed bid/ask volume.
+                    // Negative deltas (sc.BidVolume/AskVolume resetting at bar start)
+                    // are clamped to zero so accumulation only grows.
+                    if (!g_col0.initialized)
+                    {
+                        g_col0.prevRawRed  = c0r;
+                        g_col0.prevRawBlue = c0b;
+                        g_col0.accRed      = 0.0f;
+                        g_col0.accBlue     = 0.0f;
+                        g_col0.initialized = true;
+                    }
+                    else
+                    {
+                        const float dRed  = c0r - g_col0.prevRawRed;
+                        const float dBlue = c0b - g_col0.prevRawBlue;
+                        if (dRed  > 0.0f) g_col0.accRed  += dRed;
+                        if (dBlue > 0.0f) g_col0.accBlue += dBlue;
+                        g_col0.prevRawRed  = c0r;
+                        g_col0.prevRawBlue = c0b;
+                    }
+                    g_columns[0].redTarget  = g_col0.accRed;
+                    g_columns[0].blueTarget = g_col0.accBlue;
                     g_columns[1].redTarget  = c1r;
                     g_columns[1].blueTarget = c1b;
                     g_columns[2].redTarget  = c2r;
@@ -700,6 +885,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         const float fy = static_cast<float>(pt.y);
         if (fy < 50.0f
             && !PointInRectF(fx, fy, g_resetButtonRect)
+            && !PointInRectF(fx, fy, g_orientButtonRect)
             && !PointInRectF(fx, fy, g_pinButtonRect)
             && !PointInRectF(fx, fy, g_closeButtonRect))
         {
@@ -716,6 +902,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         if (PointInRectF(x, y, g_resetButtonRect))
         {
             ResetMetersToZero();
+        }
+        else if (PointInRectF(x, y, g_orientButtonRect))
+        {
+            g_isVertical = !g_isVertical;
+            SetWindowPos(hWnd, nullptr, 0, 0,
+                g_isVertical ? 220 : 700,
+                g_isVertical ? 760 : 350,
+                SWP_NOMOVE | SWP_NOZORDER);
+            InvalidateRect(hWnd, nullptr, FALSE);
         }
         else if (PointInRectF(x, y, g_pinButtonRect))
         {
@@ -756,10 +951,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             {
                 const DWORD wx = static_cast<DWORD>(static_cast<LONG>(rc.left));
                 const DWORD wy = static_cast<DWORD>(static_cast<LONG>(rc.top));
-                const DWORD wp = g_isPinned ? 1u : 0u;
-                RegSetValueExW(hKey, L"WindowX",  0, REG_DWORD, reinterpret_cast<const BYTE*>(&wx), sizeof(DWORD));
-                RegSetValueExW(hKey, L"WindowY",  0, REG_DWORD, reinterpret_cast<const BYTE*>(&wy), sizeof(DWORD));
-                RegSetValueExW(hKey, L"IsPinned", 0, REG_DWORD, reinterpret_cast<const BYTE*>(&wp), sizeof(DWORD));
+                const DWORD wp = g_isPinned  ? 1u : 0u;
+                const DWORD wv = g_isVertical ? 1u : 0u;
+                RegSetValueExW(hKey, L"WindowX",    0, REG_DWORD, reinterpret_cast<const BYTE*>(&wx), sizeof(DWORD));
+                RegSetValueExW(hKey, L"WindowY",    0, REG_DWORD, reinterpret_cast<const BYTE*>(&wy), sizeof(DWORD));
+                RegSetValueExW(hKey, L"IsPinned",   0, REG_DWORD, reinterpret_cast<const BYTE*>(&wp), sizeof(DWORD));
+                RegSetValueExW(hKey, L"IsVertical", 0, REG_DWORD, reinterpret_cast<const BYTE*>(&wv), sizeof(DWORD));
                 RegCloseKey(hKey);
             }
         }
@@ -817,6 +1014,9 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow)
             cb = sizeof(DWORD);
             if (RegQueryValueExW(hKey, L"IsPinned", nullptr, nullptr, reinterpret_cast<LPBYTE>(&val), &cb) == ERROR_SUCCESS)
                 savedPinned = (val != 0);
+            cb = sizeof(DWORD);
+            if (RegQueryValueExW(hKey, L"IsVertical", nullptr, nullptr, reinterpret_cast<LPBYTE>(&val), &cb) == ERROR_SUCCESS)
+                g_isVertical = (val != 0);
             RegCloseKey(hKey);
         }
         if (startX != CW_USEDEFAULT && startY != CW_USEDEFAULT)
@@ -837,8 +1037,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow)
         WS_POPUP,
         startX,
         startY,
-        220,
-        760,
+        g_isVertical ? 220 : 700,
+        g_isVertical ? 760 : 350,
         nullptr,
         nullptr,
         hInstance,
