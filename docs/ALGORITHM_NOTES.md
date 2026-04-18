@@ -44,8 +44,13 @@ PowerMeter.exe  (separate Win32 process)
    +-- Try OpenFileMappingW   (connects lazily)
    +-- Seqlock read -> 6 floats
    +-- Col 0: delta-accumulate with negative-delta clamping
+   +-- Set g_isLive = true (seqlock read succeeded and data age < 5000 ms)
+   |   else g_isLive = false -> demo mode, status dot turns red
    +-- Animate bars toward new targets  (exponential smoothing alpha=0.13)
-   +-- Direct2D render
+   +-- Direct2D render:
+       +-- Status dot (top-centre): green = live, red = demo
+       +-- Orient button icon: shows TARGET layout (three horizontal bars or three vertical bars)
+       +-- Meter columns (vertical or horizontal stacked)
 ```
 
 The two processes communicate exclusively via a single named memory-mapped file.

@@ -54,6 +54,7 @@ static D2D1_RECT_F g_pinButtonRect     = D2D1::RectF(0, 0, 0, 0);
 static D2D1_RECT_F g_closeButtonRect   = D2D1::RectF(0, 0, 0, 0);
 static bool        g_isPinned          = false;
 static bool        g_isVertical        = true;
+static bool        g_isLive            = false;
 
 // Column 0 delta-accumulation state for persistent reset.
 // The feed sends raw sc.BidVolume[idx] / sc.AskVolume[idx] which reset each
@@ -523,16 +524,43 @@ void DrawOrientButton()
 
     if (g_isVertical)
     {
-        // Upright T: horizontal crossbar at top, vertical stem downward
-        DrawLine(cx - 5.0f, cy - 4.0f, cx + 5.0f, cy - 4.0f, iconColor, stroke);
-        DrawLine(cx,        cy - 4.0f, cx,          cy + 5.0f, iconColor, stroke);
+        // Currently vertical — show three horizontal bars (= will switch TO horizontal)
+        DrawLine(cx - 5.5f, cy - 4.0f, cx + 5.5f, cy - 4.0f, iconColor, 2.0f);
+        DrawLine(cx - 5.5f, cy,         cx + 5.5f, cy,         iconColor, 2.0f);
+        DrawLine(cx - 5.5f, cy + 4.0f, cx + 5.5f, cy + 4.0f, iconColor, 2.0f);
     }
     else
     {
-        // Sideways T (rotated 90 deg CW): vertical bar on right, horizontal stem leftward
-        DrawLine(cx + 4.0f, cy - 5.0f, cx + 4.0f, cy + 5.0f, iconColor, stroke);
-        DrawLine(cx - 5.0f, cy,         cx + 4.0f, cy,         iconColor, stroke);
+        // Currently horizontal — show three vertical bars (= will switch TO vertical)
+        DrawLine(cx - 4.5f, cy - 5.5f, cx - 4.5f, cy + 5.5f, iconColor, stroke);
+        DrawLine(cx,        cy - 5.5f, cx,         cy + 5.5f, iconColor, stroke);
+        DrawLine(cx + 4.5f, cy - 5.5f, cx + 4.5f, cy + 5.5f, iconColor, stroke);
     }
+}
+
+void DrawStatusDot(float windowWidth)
+{
+    const float cx = windowWidth * 0.5f;
+    const float cy = 32.5f;
+    const float r  = 5.0f;
+
+    const D2D1_ELLIPSE ellipse = D2D1::Ellipse(D2D1::Point2F(cx, cy), r, r);
+
+    if (g_isLive)
+    {
+        // Green — live data
+        g_brush->SetColor(D2D1::ColorF(0.10f, 0.78f, 0.22f, 1.0f));
+        g_renderTarget->FillEllipse(ellipse, g_brush);
+        g_brush->SetColor(D2D1::ColorF(0.04f, 0.42f, 0.10f, 1.0f));
+    }
+    else
+    {
+        // Red — demo mode
+        g_brush->SetColor(D2D1::ColorF(0.82f, 0.14f, 0.10f, 1.0f));
+        g_renderTarget->FillEllipse(ellipse, g_brush);
+        g_brush->SetColor(D2D1::ColorF(0.50f, 0.06f, 0.04f, 1.0f));
+    }
+    g_renderTarget->DrawEllipse(ellipse, g_brush, 1.2f);
 }
 
 void DrawMeterColumn(const D2D1_RECT_F& outerRect, const MeterColumn& c, bool isVertical = true)
@@ -720,6 +748,7 @@ void OnPaint(HWND hWnd)
     g_closeButtonRect   = D2D1::RectF(width - 43.0f, 22.0f, width - 22.0f, 43.0f);
     DrawResetButton();
     DrawOrientButton();
+    DrawStatusDot(width);
     DrawPinButton();
     DrawCloseButton();
 
@@ -846,6 +875,8 @@ void UpdateDemo()
             CloseSharedMemory();
         }
     }
+
+    g_isLive = usedLive;
 
     if (!usedLive)
     {

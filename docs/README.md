@@ -36,7 +36,7 @@ The overlay shows three columns of data, each with a **red** (bearish / sell-sid
 
 ```
 +------------------------------+
-|  [R] [<>]           [pin][X] |  <- Reset / Orient / Pin / Close
+|  [R] [=]      (o)   [pin][X] |  <- Reset / Orient / StatusDot / Pin / Close
 |                              |
 |  TBV   ASK   Bear P/S        |  <- top labels
 |  ####  ####  ####            |  red  (sell-aggressor / bearish)
@@ -50,7 +50,7 @@ The overlay shows three columns of data, each with a **red** (bearish / sell-sid
 
 ```
 +--------------------------------------------------------+
-|  [R] [<>]                                   [pin] [X] |
+|  [R] [|||]          (o)                    [pin] [X]  |
 |                         TBV                            |
 |  #################### | ############################  |
 |                         TAV                            |
@@ -132,7 +132,8 @@ To have it launch automatically:
 | Control | Action |
 |---|---|
 | **R** button (top-left, red) | Resets Col 0 accumulator to zero with full rebase — persistent across live updates |
-| **Orient** button (top-left, green) | Toggles between vertical (220 x 760) and horizontal stacked (700 x 350) layout |
+| **Orient** button (top-left, green) | Shows `☰` (three horizontal bars) when vertical — click to go horizontal. Shows `⦀` (three vertical bars) when horizontal — click to go vertical. |
+| **Status dot** (top-centre) | Green = live Sierra Chart data. Red = demo/animated mode (no feed connected). |
 | **Pin** button (top-right, turns gold) | Toggles always-on-top mode |
 | **X** button (top-right, red) | Closes the overlay |
 | **Drag the top strip** | Moves the window anywhere on screen |
