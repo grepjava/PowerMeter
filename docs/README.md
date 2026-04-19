@@ -4,6 +4,10 @@
 
 ![CI](https://github.com/grepjava/PowerMeter/actions/workflows/ci.yml/badge.svg)
 ![Release](https://github.com/grepjava/PowerMeter/actions/workflows/release.yml/badge.svg)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
+
+> **A free, open-source Sierra Chart implementation of the power meter concept popularised by [Jigsaw Trading's DayTradr](https://www.jigsawtrading.com/) platform.**
+> If you trade with Sierra Chart and miss DayTradr's bid/ask power meters, this is the tool for you.
 
 ---
 
@@ -20,14 +24,16 @@
 9. [Choosing Between the Two Study Variants](#9-choosing-between-the-two-study-variants)
 10. [Study Parameter Reference](#10-study-parameter-reference)
 11. [CI / CD Workflows](#11-ci--cd-workflows)
-12. [Rebuilding the DLLs from Source](#11-rebuilding-the-dlls-from-source)
-12. [Troubleshooting](#12-troubleshooting)
+12. [Rebuilding the DLLs from Source](#12-rebuilding-the-dlls-from-source)
+13. [Troubleshooting](#13-troubleshooting)
 
 ---
 
 ## 1. What Is PowerMeter?
 
-PowerMeter is a two-component real-time market analysis tool for Sierra Chart:
+PowerMeter is a free, open-source Sierra Chart implementation of the **bid/ask power meter** made popular by [Jigsaw Trading's DayTradr](https://www.jigsawtrading.com/) platform. If you already use Sierra Chart and want the same at-a-glance order-flow pressure display without a separate DayTradr subscription, PowerMeter gives you that natively inside SC.
+
+It is a two-component tool:
 
 | Component | What it does |
 |---|---|
@@ -257,6 +263,8 @@ When no live data is available (PowerMeter.exe started before the SC study, or a
 
 ## 9. Choosing Between the Two Study Variants
 
+PowerMeter ships with two ACSIL study variants. The **JS** (Jigsaw-style) variant is designed to produce output closest to what DayTradr's power meter shows — plain bid/ask pull and stack sums with no extra filtering. The **Custom** variant adds configurable signal processing on top.
+
 | Feature | PowerMeterFeed (Custom) | PowerMeterFeedJS (Jigsaw-style) |
 |---|---|---|
 | Column 0 (Executed Vol) | Same | Same |
@@ -404,6 +412,42 @@ Open `ACSIL\PowerMeterFeed.vcxproj` or `ACSIL\PowerMeterFeedJS.vcxproj` in Visua
 | Two studies loaded simultaneously | Both writing to same shared memory | Remove one study. Only one PowerMeterFeed variant should be active at a time. |
 | Overlay crashes / disappears | OS DPI scaling issue | Right-click `PowerMeter.exe` → Properties → Compatibility → Override DPI scaling → "Application". |
 | Window position lost after restart | Registry permission issue | Run `PowerMeter.exe` once as Administrator to allow registry write, then run normally. |
+
+---
+
+---
+
+## Comparison with Jigsaw DayTradr Power Meters
+
+| | Jigsaw DayTradr | PowerMeter |
+|---|---|---|
+| Platform | Standalone (works with multiple brokers) | Sierra Chart only |
+| Cost | Subscription | Free / open-source |
+| Source available | No | Yes (MIT licence) |
+| Power meter display | Built-in UI | Always-on-top overlay (any layout) |
+| JS-style algorithm | Yes | Yes (`PowerMeterFeedJS`) |
+| Custom/extended algorithm | No | Yes (`PowerMeterFeed`) |
+| Configurable decay / persistence | No | Yes |
+| Rebuild from source | No | Yes (MSVC / SC built-in compiler) |
+
+PowerMeter is not affiliated with or endorsed by Jigsaw Trading. DayTradr is a trademark of Jigsaw Trading Ltd.
+
+---
+
+## Contributing
+
+Pull requests are welcome. For significant changes, open an issue first to discuss the approach.
+
+To build everything locally:
+
+```powershell
+# Overlay (requires Visual Studio 2022)
+msbuild PowerMeter.vcxproj /p:Configuration=Release /p:Platform=x64
+
+# ACSIL DLLs
+cd ACSIL
+.\build_acsil.ps1
+```
 
 ---
 
