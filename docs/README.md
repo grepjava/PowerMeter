@@ -4,7 +4,7 @@
 
 ![CI](https://github.com/grepjava/PowerMeter/actions/workflows/ci.yml/badge.svg)
 ![Release](https://github.com/grepjava/PowerMeter/actions/workflows/release.yml/badge.svg)
-![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
+![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue.svg)
 
 > **A free, open-source Sierra Chart implementation of the power meter concept popularised by [Jigsaw Trading's DayTradr](https://www.jigsawtrading.com/) platform.**
 > If you trade with Sierra Chart and miss DayTradr's bid/ask power meters, this is the tool for you.
@@ -448,6 +448,15 @@ msbuild PowerMeter.vcxproj /p:Configuration=Release /p:Platform=x64
 cd ACSIL
 .\build_acsil.ps1
 ```
+
+---
+
+## Licence
+
+PowerMeter is dual-licensed:
+
+- **Free for non-commercial use** under the [PolyForm Noncommercial 1.0.0](../LICENSE) licence — covers individual traders, hobbyists, researchers, and non-profits.
+- **Commercial licence required** if you bundle, redistribute, or use PowerMeter as part of a revenue-generating product or service. See [COMMERCIAL_LICENSE.md](../COMMERCIAL_LICENSE.md) for details and contact information.
 
 ---
 
