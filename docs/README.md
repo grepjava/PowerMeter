@@ -458,6 +458,8 @@ PowerMeter is dual-licensed:
 - **Free for non-commercial use** under the [PolyForm Noncommercial 1.0.0](../LICENSE) licence — covers individual traders, hobbyists, researchers, and non-profits.
 - **Commercial licence required** if you bundle, redistribute, or use PowerMeter as part of a revenue-generating product or service. See [COMMERCIAL_LICENSE.md](../COMMERCIAL_LICENSE.md) for details and contact information.
 
+
+
 ---
 
 *For technical details about the algorithms, see `docs\ALGORITHM_NOTES.md`.*
