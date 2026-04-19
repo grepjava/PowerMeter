@@ -8,7 +8,7 @@ name: CI
 on:
   push:
     branches: ["**"]
-    tags-ignore: ["v*"]      # releases are handled by release.yml
+    tags-ignore: ["v*"]
   pull_request:
     branches: ["**"]
 
@@ -34,6 +34,7 @@ jobs:
           msbuild PowerMeter.vcxproj `
             /p:Configuration=Release `
             /p:Platform=x64 `
+            /p:PlatformToolset=v143 `
             /v:minimal `
             /nologo
 
@@ -82,23 +83,14 @@ jobs:
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
 
-      - name: Download Sierra Chart ACS_Source headers
-        shell: pwsh
-        run: |
-          $dest = "${{ github.workspace }}\sc_stub\ACS_Source"
-          New-Item -ItemType Directory -Force $dest | Out-Null
-          foreach ($f in @("sierrachart.h","SCStructures.h","SCDateTime.h")) {
-            Invoke-WebRequest -Uri "https://www.sierrachart.com/ACS_Source/$f" `
-                              -OutFile "$dest\$f" -UseBasicParsing
-            Write-Host "Downloaded $f"
-          }
-
+      # SC headers are bundled in ACSIL/sc_stub/ACS_Source/ — no download needed.
       - name: Build PowerMeterFeed DLL (Debug x64)
         run: |
           msbuild PowerMeterFeed.vcxproj `
             /p:Configuration=Debug `
             /p:Platform=x64 `
-            /p:SierraChartRoot="${{ github.workspace }}\sc_stub" `
+            /p:PlatformToolset=v143 `
+            /p:SierraChartRoot="${{ github.workspace }}\ACSIL\sc_stub" `
             /v:minimal `
             /nologo
         working-directory: ACSIL
@@ -108,7 +100,8 @@ jobs:
           msbuild PowerMeterFeedJS.vcxproj `
             /p:Configuration=Debug `
             /p:Platform=x64 `
-            /p:SierraChartRoot="${{ github.workspace }}\sc_stub" `
+            /p:PlatformToolset=v143 `
+            /p:SierraChartRoot="${{ github.workspace }}\ACSIL\sc_stub" `
             /v:minimal `
             /nologo
         working-directory: ACSIL
