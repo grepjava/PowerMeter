@@ -1,0 +1,166 @@
+name: Release
+
+# Triggered when a version tag is pushed:
+#   git tag v1.2.0 && git push origin v1.2.0
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Publish Release
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Parse version from tag
+        id: version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $ver = $tag -replace '^v', ''
+          Write-Host "Tag: $tag  Version: $ver"
+          "tag=$tag"     | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "version=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build PowerMeter.exe (Release x64)
+        run: |
+          msbuild PowerMeter.vcxproj `
+            /p:Configuration=Release `
+            /p:Platform=x64 `
+            /v:minimal `
+            /nologo
+
+      - name: Create SC stub directories
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "${{ github.workspace }}\sc_stub\ACS_Source" | Out-Null
+          New-Item -ItemType Directory -Force "${{ github.workspace }}\sc_stub\Data"       | Out-Null
+
+      - name: Download Sierra Chart ACS_Source headers
+        shell: pwsh
+        run: |
+          $dest = "${{ github.workspace }}\sc_stub\ACS_Source"
+          foreach ($f in @("sierrachart.h","SCStructures.h","SCDateTime.h")) {
+            Invoke-WebRequest -Uri "https://www.sierrachart.com/ACS_Source/$f" `
+                              -OutFile "$dest\$f" -UseBasicParsing
+            Write-Host "Downloaded $f"
+          }
+
+      - name: Build PowerMeterFeed_64.dll (Release x64)
+        run: |
+          msbuild PowerMeterFeed.vcxproj `
+            /p:Configuration=Release `
+            /p:Platform=x64 `
+            /p:SierraChartRoot="${{ github.workspace }}\sc_stub" `
+            /v:minimal `
+            /nologo
+        working-directory: ACSIL
+
+      - name: Build PowerMeterFeedJS_64.dll (Release x64)
+        run: |
+          msbuild PowerMeterFeedJS.vcxproj `
+            /p:Configuration=Release `
+            /p:Platform=x64 `
+            /p:SierraChartRoot="${{ github.workspace }}\sc_stub" `
+            /v:minimal `
+            /nologo
+        working-directory: ACSIL
+
+      - name: Smoke test - all binaries valid AMD64 PE
+        shell: pwsh
+        run: |
+          $exeCandidates = @("x64\Release\PowerMeter.exe","PowerMeter\x64\Release\PowerMeter.exe")
+          $exe = $exeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $exe) { Write-Error "PowerMeter.exe not found"; exit 1 }
+
+          $binaries = @(
+            $exe,
+            "${{ github.workspace }}\sc_stub\Data\PowerMeterFeed_64.dll",
+            "${{ github.workspace }}\sc_stub\Data\PowerMeterFeedJS_64.dll"
+          )
+          foreach ($bin in $binaries) {
+            if (-not (Test-Path $bin)) { Write-Error "Not found: $bin"; exit 1 }
+            $bytes    = [System.IO.File]::ReadAllBytes($bin)
+            if ($bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) { Write-Error "Bad MZ: $bin"; exit 1 }
+            $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
+            $machine  = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+            if ($machine -ne 0x8664) { Write-Error ("Not AMD64: $bin" -f $machine); exit 1 }
+            Write-Host ("PASS: $(Split-Path $bin -Leaf)  ({0:N0} bytes)" -f (Get-Item $bin).Length)
+          }
+          # Store exe path for packaging step
+          "exe_path=$exe" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+        id: smoketest
+
+      - name: Assemble distribution ZIP
+        id: package
+        shell: pwsh
+        run: |
+          $ver     = "${{ steps.version.outputs.version }}"
+          $stub    = "${{ github.workspace }}\sc_stub"
+          $exe     = "${{ steps.smoketest.outputs.exe_path }}"
+          $distDir = "dist\PowerMeter_v$ver"
+          $zipPath = "dist\PowerMeter_v$ver.zip"
+
+          foreach ($d in @($distDir,"$distDir\ACSIL","$distDir\ACSIL\src","$distDir\docs")) {
+            New-Item -ItemType Directory -Force $d | Out-Null
+          }
+
+          Copy-Item $exe                                    "$distDir\PowerMeter.exe"
+          Copy-Item "$stub\Data\PowerMeterFeed_64.dll"      "$distDir\ACSIL\"
+          Copy-Item "$stub\Data\PowerMeterFeedJS_64.dll"    "$distDir\ACSIL\"
+          Copy-Item "PowerMeterFeed.cpp"                    "$distDir\ACSIL\src\"
+          Copy-Item "PowerMeterFeedJS.cpp"                  "$distDir\ACSIL\src\"
+          Copy-Item "build_acsil.ps1"                       "$distDir\ACSIL\"
+          Copy-Item "docs\README.md"                        "$distDir\README.md"
+          Copy-Item "docs\ALGORITHM_NOTES.md"               "$distDir\docs\"
+
+          Compress-Archive -Path "$distDir\*" -DestinationPath $zipPath -Force
+          Write-Host "Package: $zipPath"
+          "zip_path=$zipPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Generate release notes
+        shell: pwsh
+        run: |
+          $tag     = "${{ steps.version.outputs.tag }}"
+          $prevTag = git describe --tags --abbrev=0 "$tag^" 2>$null
+          if ($prevTag) {
+            $log = git log "$prevTag..$tag" --pretty=format:"- %s" --no-merges
+          } else {
+            $log = git log $tag --pretty=format:"- %s" --no-merges | Select-Object -First 20
+          }
+          @"
+          ## What's changed
+          $($log -join "`n")
+
+          ## Installation
+          1. Extract the ZIP.
+          2. Copy ``ACSIL\PowerMeterFeed_64.dll`` (or ``PowerMeterFeedJS_64.dll``) to ``C:\SierraChart\Data\``.
+          3. Run ``PowerMeter.exe``.
+          4. Load the study: **Analysis -> Add Custom Study -> PowerMeter Feed**.
+
+          See ``README.md`` inside the ZIP for full instructions.
+          "@ | Out-File -FilePath release_notes.md -Encoding utf8
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: PowerMeter ${{ steps.version.outputs.tag }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.tag, '-') }}
+          files: ${{ steps.package.outputs.zip_path }}
