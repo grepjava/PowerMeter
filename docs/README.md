@@ -1,6 +1,9 @@
 # PowerMeter — User Guide
 
-> **Version 1.1** | Windows 10 / 11 (64-bit) | Sierra Chart compatible
+> **Version 1.2** | Windows 10 / 11 (64-bit) | Sierra Chart compatible
+
+![CI](https://github.com/grepjava/PowerMeter/actions/workflows/ci.yml/badge.svg)
+![Release](https://github.com/grepjava/PowerMeter/actions/workflows/release.yml/badge.svg)
 
 ---
 
@@ -16,7 +19,8 @@
 8. [Reading the Overlay](#8-reading-the-overlay)
 9. [Choosing Between the Two Study Variants](#9-choosing-between-the-two-study-variants)
 10. [Study Parameter Reference](#10-study-parameter-reference)
-11. [Rebuilding the DLLs from Source](#11-rebuilding-the-dlls-from-source)
+11. [CI / CD Workflows](#11-ci--cd-workflows)
+12. [Rebuilding the DLLs from Source](#11-rebuilding-the-dlls-from-source)
 12. [Troubleshooting](#12-troubleshooting)
 
 ---
@@ -315,7 +319,48 @@ When no live data is available (PowerMeter.exe started before the SC study, or a
 
 ---
 
-## 11. Rebuilding the DLLs from Source
+## 11. CI / CD Workflows
+
+The repository includes two GitHub Actions workflows in `.github/workflows/`.
+
+### ci.yml — Continuous Integration
+
+Runs on **every push and pull request** (excluding version tags).
+
+| Job | What it does |
+|---|---|
+| `build-overlay` | Builds `PowerMeter.exe` (Release \| x64) via MSBuild |
+| `build-acsil` | Builds both ACSIL DLLs (Debug \| x64) after downloading Sierra Chart headers |
+| `ci-passed` | Summary gate — set this as the required status check in branch protection rules |
+
+**Smoke tests (run automatically):**
+- MZ / PE header validation — confirms a real Windows binary was produced
+- Machine type check — confirms AMD64 (64-bit), not x86
+- Minimum file size check — catches empty or truncated outputs
+- `dumpbin /exports` — verifies `scsf_PowerMeterFeed` and `scsf_PowerMeterFeedJS` are exported from their respective DLLs
+
+### release.yml — Release publishing
+
+Triggered by pushing a **version tag**:
+
+```
+git tag v1.2.0
+git push origin v1.2.0
+```
+
+| Step | What it does |
+|---|---|
+| Parse version | Extracts version string from tag (e.g. `v1.2.0` → `1.2.0`) |
+| Build overlay | `PowerMeter.exe` Release x64 |
+| Build DLLs | Both ACSIL DLLs Release x64 (SC headers downloaded automatically) |
+| Smoke tests | Same PE / AMD64 / size checks as CI |
+| Assemble ZIP | Builds `PowerMeter_v1.2.0.zip` with exe, DLLs, sources, docs |
+| GitHub Release | Creates a GitHub Release, attaches the ZIP, auto-generates changelog from git log |
+
+**Pre-release tags** — any tag containing a hyphen (e.g. `v1.3.0-rc1`) is published as a pre-release automatically.
+
+---
+## 12. Rebuilding the DLLs from Source
 
 The pre-built DLLs target x64 Windows. If you need to rebuild:
 
@@ -345,7 +390,7 @@ Open `ACSIL\PowerMeterFeed.vcxproj` or `ACSIL\PowerMeterFeedJS.vcxproj` in Visua
 
 ---
 
-## 12. Troubleshooting
+## 13. Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
@@ -363,3 +408,4 @@ Open `ACSIL\PowerMeterFeed.vcxproj` or `ACSIL\PowerMeterFeedJS.vcxproj` in Visua
 ---
 
 *For technical details about the algorithms, see `docs\ALGORITHM_NOTES.md`.*
+

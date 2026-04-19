@@ -423,3 +423,45 @@ The Reset button is most useful at:
 - Whenever you want a fresh read on execution bias from a specific price or time
 
 The rebase mechanism means you can reset as often as you like without affecting the Sierra Chart data source.
+---
+
+## 8. CI / CD Reference
+
+| Workflow | File | Trigger |
+|---|---|---|
+| CI | `.github/workflows/ci.yml` | Push to any branch; pull requests |
+| Release | `.github/workflows/release.yml` | Push of a `v*.*.*` tag |
+
+### What the CI build validates
+
+| Check | Tool | Pass condition |
+|---|---|---|
+| PowerMeter.exe compiles | MSBuild Release x64 | Exit code 0 |
+| Feed DLLs compile | MSBuild Debug x64 | Exit code 0 |
+| Valid PE image | PowerShell byte read | MZ header present |
+| 64-bit binary | PowerShell byte read | Machine == 0x8664 (AMD64) |
+| Non-trivial size | PowerShell | exe > 50 KB; dlls > 10 KB |
+| ACSIL entry point exported | dumpbin /exports | `scsf_PowerMeterFeed` / `scsf_PowerMeterFeedJS` present |
+
+### Release artefact contents
+
+```
+PowerMeter_v<version>.zip
++-- PowerMeter.exe
++-- README.md
++-- ACSIL/
+|   +-- PowerMeterFeed_64.dll
+|   +-- PowerMeterFeedJS_64.dll
+|   +-- build_acsil.ps1
+|   +-- src/
+|       +-- PowerMeterFeed.cpp
+|       +-- PowerMeterFeedJS.cpp
++-- docs/
+    +-- ALGORITHM_NOTES.md
+```
+
+### Sierra Chart headers on CI
+
+The ACSIL DLLs require `sierrachart.h` and related headers from Sierra Chart's `ACS_Source` directory.
+Both workflows download these directly from `https://www.sierrachart.com/ACS_Source/` at build time,
+so no Sierra Chart installation is required on the runner.
