@@ -125,25 +125,32 @@ jobs:
             Write-Host ("PASS: $(Split-Path $dll -Leaf)  ({0:N0} bytes, AMD64)" -f $size)
           }
 
-      - name: Smoke test - scsf_PowerMeterFeed exported
+      - name: Smoke test - DLL exports
         shell: pwsh
         run: |
-          $dll     = "ACSIL\bin\x64\Debug\PowerMeterFeed_64_d.dll"
-          $exports = dumpbin /exports $dll 2>&1
-          if ($exports -notmatch "scsf_PowerMeterFeed") {
-            Write-Error "Export 'scsf_PowerMeterFeed' not found"; Write-Host $exports; exit 1
-          }
-          Write-Host "PASS: scsf_PowerMeterFeed exported"
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath  = & $vswhere -latest -property installationPath
+          $dumpbin = Get-ChildItem "$vsPath\VC\Tools\MSVC" -Recurse -Filter "dumpbin.exe" |
+                       Where-Object { $_.FullName -match "HostX64\\x64" } |
+                       Select-Object -First 1
+          if (-not $dumpbin) { Write-Error "dumpbin.exe not found via vswhere"; exit 1 }
+          Write-Host "dumpbin: $($dumpbin.FullName)"
 
-      - name: Smoke test - scsf_PowerMeterFeedJS exported
-        shell: pwsh
-        run: |
-          $dll     = "ACSIL\bin\x64\Debug\PowerMeterFeedJS_64_d.dll"
-          $exports = dumpbin /exports $dll 2>&1
-          if ($exports -notmatch "scsf_PowerMeterFeedJS") {
-            Write-Error "Export 'scsf_PowerMeterFeedJS' not found"; Write-Host $exports; exit 1
+          $checks = @{
+            "ACSIL\bin\x64\Debug\PowerMeterFeed_64_d.dll"   = "scsf_PowerMeterFeed"
+            "ACSIL\bin\x64\Debug\PowerMeterFeedJS_64_d.dll" = "scsf_PowerMeterFeedJS"
           }
-          Write-Host "PASS: scsf_PowerMeterFeedJS exported"
+          foreach ($entry in $checks.GetEnumerator()) {
+            $dll     = $entry.Key
+            $symbol  = $entry.Value
+            $exports = & $dumpbin.FullName /exports $dll 2>&1
+            if ($exports -notmatch [regex]::Escape($symbol)) {
+              Write-Error "Export '$symbol' not found in $dll"
+              Write-Host $exports
+              exit 1
+            }
+            Write-Host "PASS: $symbol exported from $(Split-Path $dll -Leaf)"
+          }
 
       - name: Upload ACSIL artifacts
         uses: actions/upload-artifact@v4
