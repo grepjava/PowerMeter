@@ -136,17 +136,18 @@ jobs:
           if (-not $dumpbin) { Write-Error "dumpbin.exe not found via vswhere"; exit 1 }
           Write-Host "dumpbin: $($dumpbin.FullName)"
 
-          $checks = @{
-            "ACSIL\bin\x64\Debug\PowerMeterFeed_64_d.dll"   = "scsf_PowerMeterFeed"
-            "ACSIL\bin\x64\Debug\PowerMeterFeedJS_64_d.dll" = "scsf_PowerMeterFeedJS"
-          }
-          foreach ($entry in $checks.GetEnumerator()) {
-            $dll     = $entry.Key
-            $symbol  = $entry.Value
-            $exports = & $dumpbin.FullName /exports $dll 2>&1
-            if ($exports -notmatch [regex]::Escape($symbol)) {
+          $checks = @(
+            @{ dll = "ACSIL\bin\x64\Debug\PowerMeterFeed_64_d.dll";   symbol = "scsf_PowerMeterFeed" },
+            @{ dll = "ACSIL\bin\x64\Debug\PowerMeterFeedJS_64_d.dll"; symbol = "scsf_PowerMeterFeedJS" }
+          )
+          foreach ($check in $checks) {
+            $dll    = $check.dll
+            $symbol = $check.symbol
+            Write-Host "Checking exports of $dll for '$symbol'..."
+            $exports = & $dumpbin.FullName /exports $dll 2>&1 | Out-String
+            Write-Host $exports
+            if ($exports -notmatch $symbol) {
               Write-Error "Export '$symbol' not found in $dll"
-              Write-Host $exports
               exit 1
             }
             Write-Host "PASS: $symbol exported from $(Split-Path $dll -Leaf)"
