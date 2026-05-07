@@ -425,9 +425,10 @@ Installer output:
 
 ### Installer behavior
 
+- Setup type options: **UI only**, **UI + ACSIL**, or **Custom**
 - Installs `PowerMeter.exe` + docs to Program Files
-- Prompts for Sierra Chart root path
-- Copies ACSIL DLLs into `<SierraChartRoot>\Data\`
+- Shows Sierra Chart path page only when ACSIL component is selected
+- When ACSIL is selected, copies DLLs into `<SierraChartRoot>\Data\`
 - Creates Start Menu shortcut (optional desktop shortcut)
 
 ---
@@ -497,6 +498,7 @@ PowerMeter is dual-licensed:
 ---
 
 *For technical details about the algorithms, see `docs\ALGORITHM_NOTES.md`.*
+
 
 
 

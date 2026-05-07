@@ -24,20 +24,29 @@ ArchitecturesInstallIn64BitMode=x64
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
+[Types]
+Name: "full"; Description: "Full installation (UI + ACSIL studies)"
+Name: "uionly"; Description: "UI only (no ACSIL DLL install)"
+Name: "custom"; Description: "Custom installation"; Flags: iscustom
+
+[Components]
+Name: "ui"; Description: "PowerMeter UI"; Types: full uionly custom; Flags: fixed
+Name: "acsil"; Description: "Sierra Chart ACSIL studies (DLLs)"; Types: full custom
+
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional icons:"; Flags: unchecked
 
 [Files]
-Source: "{#BundleRoot}\PowerMeter.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#BundleRoot}\README.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#BundleRoot}\docs\ALGORITHM_NOTES.md"; DestDir: "{app}\docs"; Flags: ignoreversion
-Source: "{#BundleRoot}\ACSIL\PowerMeterFeed_64.dll"; DestDir: "{code:GetSCDataDir}"; Flags: ignoreversion
-Source: "{#BundleRoot}\ACSIL\PowerMeterFeedJS_64.dll"; DestDir: "{code:GetSCDataDir}"; Flags: ignoreversion
-Source: "{#BundleRoot}\ACSIL\build_acsil.ps1"; DestDir: "{app}\ACSIL"; Flags: ignoreversion
-Source: "{#BundleRoot}\ACSIL\src\PowerMeterFeed.cpp"; DestDir: "{app}\ACSIL\src"; Flags: ignoreversion
-Source: "{#BundleRoot}\ACSIL\src\PowerMeterFeedJS.cpp"; DestDir: "{app}\ACSIL\src"; Flags: ignoreversion
-Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
-Source: "..\COMMERCIAL_LICENSE.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "{#BundleRoot}\PowerMeter.exe"; DestDir: "{app}"; Flags: ignoreversion; Components: ui
+Source: "{#BundleRoot}\README.md"; DestDir: "{app}"; Flags: ignoreversion; Components: ui
+Source: "{#BundleRoot}\docs\ALGORITHM_NOTES.md"; DestDir: "{app}\docs"; Flags: ignoreversion; Components: ui
+Source: "{#BundleRoot}\ACSIL\PowerMeterFeed_64.dll"; DestDir: "{code:GetSCDataDir}"; Flags: ignoreversion; Components: acsil
+Source: "{#BundleRoot}\ACSIL\PowerMeterFeedJS_64.dll"; DestDir: "{code:GetSCDataDir}"; Flags: ignoreversion; Components: acsil
+Source: "{#BundleRoot}\ACSIL\build_acsil.ps1"; DestDir: "{app}\ACSIL"; Flags: ignoreversion; Components: acsil
+Source: "{#BundleRoot}\ACSIL\src\PowerMeterFeed.cpp"; DestDir: "{app}\ACSIL\src"; Flags: ignoreversion; Components: acsil
+Source: "{#BundleRoot}\ACSIL\src\PowerMeterFeedJS.cpp"; DestDir: "{app}\ACSIL\src"; Flags: ignoreversion; Components: acsil
+Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist; Components: ui
+Source: "..\COMMERCIAL_LICENSE.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist; Components: ui
 
 [Icons]
 Name: "{group}\PowerMeter"; Filename: "{app}\PowerMeter.exe"
@@ -55,6 +64,13 @@ var
 function GetSCDataDir(Param: string): string;
 begin
   Result := AddBackslash(SCPathPage.Values[0]) + 'Data';
+end;
+
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := False;
+  if (PageID = SCPathPage.ID) and (not WizardIsComponentSelected('acsil')) then
+    Result := True;
 end;
 
 procedure InitializeWizard;
