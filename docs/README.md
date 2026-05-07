@@ -25,7 +25,8 @@
 10. [Study Parameter Reference](#10-study-parameter-reference)
 11. [CI / CD Workflows](#11-ci--cd-workflows)
 12. [Rebuilding the DLLs from Source](#12-rebuilding-the-dlls-from-source)
-13. [Troubleshooting](#13-troubleshooting)
+13. [Installer (Windows Setup EXE)](#13-installer-windows-setup-exe)
+14. [Troubleshooting](#14-troubleshooting)
 
 ---
 
@@ -398,7 +399,40 @@ Open `ACSIL\PowerMeterFeed.vcxproj` or `ACSIL\PowerMeterFeedJS.vcxproj` in Visua
 
 ---
 
-## 13. Troubleshooting
+## 13. Installer (Windows Setup EXE)
+
+PowerMeter includes an Inno Setup installer definition at `installer\PowerMeter.iss` and a helper build script `installer\build_installer.ps1`.
+
+### Prerequisites
+
+- Visual Studio 2022 (Desktop development with C++)
+- Inno Setup 6 (provides `ISCC.exe`)
+
+### Build command
+
+```powershell
+./installer/build_installer.ps1 -Version "1.2.0" -SCRoot "C:\SierraChart"
+```
+
+If you already have a prepared package folder and only want to rebuild the installer:
+
+```powershell
+./installer/build_installer.ps1 -Version "1.2.0" -SkipPackage
+```
+
+Installer output:
+- `dist\PowerMeterInstaller_v<Version>.exe`
+
+### Installer behavior
+
+- Installs `PowerMeter.exe` + docs to Program Files
+- Prompts for Sierra Chart root path
+- Copies ACSIL DLLs into `<SierraChartRoot>\Data\`
+- Creates Start Menu shortcut (optional desktop shortcut)
+
+---
+
+## 14. Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
@@ -463,4 +497,13 @@ PowerMeter is dual-licensed:
 ---
 
 *For technical details about the algorithms, see `docs\ALGORITHM_NOTES.md`.*
+
+
+
+
+
+
+
+
+
 
