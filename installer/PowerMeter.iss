@@ -20,6 +20,10 @@ SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=admin
 ArchitecturesInstallIn64BitMode=x64
+UsePreviousSetupType=no
+UsePreviousTasks=no
+AlwaysShowComponentsList=yes
+DefaultTypeName=full
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
